@@ -57,6 +57,9 @@ logs/
 .env.production
 .env.staging
 
+# Fonts
+fonts/
+
 # OCR specific
 process/
 result/

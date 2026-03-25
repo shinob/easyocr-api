@@ -94,7 +94,8 @@ install_system_dependencies() {
         # libgl1-mesa-glx（OpenCV用）
         if ! dpkg -l | grep -q libgl1-mesa-glx; then
             log_warning "OpenCV用のライブラリをインストールします..."
-            sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+            #sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libgl1
+            sudo apt-get install -y libglib2.0-0 libgl1
         fi
     
     # macOS（Homebrew）の場合

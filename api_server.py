@@ -232,14 +232,19 @@ async def download_processed_image(image_filename: str):
     """
     処理済み画像をダウンロード
     """
-    image_path = ocr_manager.process_dir / image_filename
-    
+    safe_name = Path(image_filename).name
+    image_path = (ocr_manager.process_dir / safe_name).resolve()
+    allowed_dir = ocr_manager.process_dir.resolve()
+
+    if not image_path.is_relative_to(allowed_dir):
+        raise HTTPException(status_code=400, detail="不正なファイルパスです")
+
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="画像ファイルが見つかりません")
-    
+
     return FileResponse(
         path=image_path,
-        filename=image_filename,
+        filename=safe_name,
         media_type="image/png"
     )
 
@@ -248,14 +253,19 @@ async def download_csv(csv_filename: str):
     """
     CSVファイルをダウンロード
     """
-    csv_path = ocr_manager.result_dir / csv_filename
-    
+    safe_name = Path(csv_filename).name
+    csv_path = (ocr_manager.result_dir / safe_name).resolve()
+    allowed_dir = ocr_manager.result_dir.resolve()
+
+    if not csv_path.is_relative_to(allowed_dir):
+        raise HTTPException(status_code=400, detail="不正なファイルパスです")
+
     if not csv_path.exists():
         raise HTTPException(status_code=404, detail="CSVファイルが見つかりません")
-    
+
     return FileResponse(
         path=csv_path,
-        filename=csv_filename,
+        filename=safe_name,
         media_type="text/csv"
     )
 
