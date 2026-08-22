@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 class OCRProcessor:
     def __init__(self):
-        self.reader = easyocr.Reader(['ja', 'en'])
+        self.reader = easyocr.Reader(['ja', 'en'], gpu=False)
         self.images_dir = Path('images')
         self.process_dir = Path('process')
         self.result_dir = Path('result')
@@ -66,7 +66,7 @@ class OCRProcessor:
     
     def get_image_files(self):
         """imagesディレクトリから画像ファイルを取得"""
-        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff', '*.webp']
+        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tif', '*.tiff', '*.webp']
         image_files = []
         
         for ext in image_extensions:
@@ -90,20 +90,29 @@ class OCRProcessor:
     def process_image(self, image_path):
         """単一画像のOCR処理"""
         try:
-            # 画像を読み込み
-            image = cv2.imread(str(image_path))
+            # PIL経由で読み込み（CCITTFAX4等OpenCVが対応しない形式も処理可能）
+            # グレースケール画像は L モードのまま保持し、RGB強制変換による品質低下を防ぐ
+            raw_img = Image.open(str(image_path))
+            if raw_img.mode in ('1', 'P', 'RGBA', 'CMYK'):
+                pil_img = raw_img.convert('RGB')
+            elif raw_img.mode == 'L':
+                pil_img = raw_img  # グレースケールはそのまま
+            else:
+                pil_img = raw_img.convert('RGB')
+            image = cv2.cvtColor(np.array(pil_img, dtype=np.uint8),
+                                 cv2.COLOR_GRAY2BGR if pil_img.mode == 'L' else cv2.COLOR_RGB2BGR)
             if image is None:
                 print(f"画像の読み込みに失敗しました: {image_path}")
                 return None
-            
-            # OCR実行
-            results = self.reader.readtext(str(image_path))
-            
+
+            # OCR実行（numpy配列で渡す）
+            results = self.reader.readtext(np.array(pil_img, dtype=np.uint8))
+
             # 結果を処理用画像に描画
             processed_image = self.draw_results(image.copy(), results)
-            
-            # ユニークなファイル名で処理済み画像を保存
-            unique_processed_name = self.generate_unique_filename(image_path.name, "processed")
+
+            # 処理済み画像は常にPNGで保存（元の拡張子に関わらず統一）
+            unique_processed_name = self.generate_unique_filename(image_path.stem + '.png', "processed")
             output_image_path = self.process_dir / unique_processed_name
             cv2.imwrite(str(output_image_path), processed_image)
             
@@ -192,14 +201,10 @@ class OCRProcessor:
         return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
     
     def save_to_csv(self, data, filename):
-        """データをCSVファイルに保存"""
-        if not data:
-            return
-        
+        """データをCSVファイルに保存（テキスト未検出時もヘッダーのみ作成）"""
         with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['original_filename', 'processed_filename', 'text', 'confidence', 'x1', 'y1', 'x2', 'y2', 'timestamp']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
             writer.writeheader()
             for row in data:
                 writer.writerow(row)

@@ -84,3 +84,8 @@ htmlcov/
 
 # Documentation
 docs/_build/
+
+# Agent/project docs
+CLAUDE.md
+AGENTS.md
+project.md

@@ -49,16 +49,32 @@ class OCRAPIManager:
         try:
             images = pdf2image.convert_from_path(pdf_path, dpi=300)
             image_paths = []
-            
+
             for i, image in enumerate(images):
                 image_filename = f"{pdf_path.stem}_page_{i+1:03d}.png"
                 image_path = self.images_dir / image_filename
                 image.save(image_path, 'PNG')
                 image_paths.append(image_path)
-            
+
             return image_paths
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"PDF変換エラー: {str(e)}")
+
+    def convert_tif_to_images(self, tif_path: Path) -> List[Path]:
+        """TIF（マルチページ対応）をページごとのPNG画像に変換"""
+        try:
+            image_paths = []
+            with Image.open(tif_path) as img:
+                n_frames = getattr(img, 'n_frames', 1)
+                for i in range(n_frames):
+                    img.seek(i)
+                    image_filename = f"{tif_path.stem}_page_{i+1:03d}.png"
+                    image_path = self.images_dir / image_filename
+                    img.convert('RGB').save(image_path, 'PNG')
+                    image_paths.append(image_path)
+            return image_paths
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"TIF変換エラー: {str(e)}")
     
     def save_uploaded_file(self, file: UploadFile) -> Path:
         """アップロードされたファイルを保存"""
@@ -79,7 +95,11 @@ class OCRAPIManager:
             # PDFの場合は画像に変換
             image_paths = self.convert_pdf_to_images(file_path)
             processed_files = [path.name for path in image_paths]
-        elif file_extension in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']:
+        elif file_extension in ['.tif', '.tiff']:
+            # TIFの場合はマルチページ対応でPNGに変換
+            image_paths = self.convert_tif_to_images(file_path)
+            processed_files = [path.name for path in image_paths]
+        elif file_extension in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
             # 画像ファイルの場合はimagesディレクトリにコピー
             target_path = self.images_dir / file_path.name
             shutil.copy2(file_path, target_path)
@@ -90,7 +110,7 @@ class OCRAPIManager:
         return {
             "original_filename": file_path.name,
             "processed_files": processed_files,
-            "file_type": "pdf" if file_extension == '.pdf' else "image"
+            "file_type": "pdf" if file_extension == '.pdf' else ("tif" if file_extension in ['.tif', '.tiff'] else "image")
         }
     
     def check_ocr_status(self, filename: str) -> Dict[str, Any]:
@@ -99,16 +119,17 @@ class OCRAPIManager:
         base_name = Path(filename).stem
         
         # imagesディレクトリに対象ファイルがあるかチェック（処理待ち）
+        # マルチページ展開後のページファイル（例: stem_page_001.png）も含めて検索
         images_exist = any(
-            file.stem == base_name 
+            file.stem == base_name or file.stem.startswith(base_name + '_page_')
             for file in self.images_dir.glob("*")
         )
-        
+
         # processディレクトリに処理済み画像があるかチェック
-        processed_images = list(self.process_dir.glob(f"*_processed_{base_name}.*"))
-        
+        processed_images = list(self.process_dir.glob(f"*_processed_{base_name}*"))
+
         # resultディレクトリにCSVファイルがあるかチェック
-        result_csv = list(self.result_dir.glob(f"*_result_{base_name}.csv"))
+        result_csv = list(self.result_dir.glob(f"*_result_{base_name}*.csv"))
         
         if images_exist:
             status = "pending"
@@ -132,9 +153,9 @@ class OCRAPIManager:
         """OCR結果を取得"""
         base_name = Path(filename).stem
         
-        # 処理済み画像とCSVファイルを検索
-        processed_images = list(self.process_dir.glob(f"*_processed_{base_name}.*"))
-        result_csvs = list(self.result_dir.glob(f"*_result_{base_name}.csv"))
+        # 処理済み画像とCSVファイルを検索（マルチページ対応）
+        processed_images = list(self.process_dir.glob(f"*_processed_{base_name}*"))
+        result_csvs = list(self.result_dir.glob(f"*_result_{base_name}*.csv"))
         
         if not processed_images and not result_csvs:
             raise HTTPException(status_code=404, detail="処理結果が見つかりません")

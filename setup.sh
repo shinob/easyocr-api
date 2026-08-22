@@ -43,6 +43,7 @@ show_help() {
     echo "使用法:"
     echo "  ./setup.sh [command] [options]"
     echo "  API_PORT=3000 ./setup.sh start    # ポート指定"
+    echo "  API_HOST=127.0.0.1 ./setup.sh start  # 待受アドレス指定"
     echo ""
     echo "コマンド:"
     echo "  install     - 依存関係をインストール"
@@ -60,6 +61,7 @@ show_help() {
     echo "  ./setup.sh setup              # 初回セットアップ"
     echo "  ./setup.sh start              # サービス起動（ポート8000）"
     echo "  API_PORT=8001 ./setup.sh start  # ポート8001で起動"
+    echo "  API_HOST=dual ./setup.sh start  # IPv4/IPv6で待受（デフォルト）"
     echo "  ./setup.sh test               # テスト実行"
 }
 
@@ -155,9 +157,33 @@ initialize_directories() {
 PID_DIR="$PROJECT_DIR/logs"
 OCR_PID_FILE="$PID_DIR/ocr_processor.pid"
 API_PID_FILE="$PID_DIR/api_server.pid"
+API_IPV4_PID_FILE="$PID_DIR/api_server_ipv4.pid"
+API_IPV6_PID_FILE="$PID_DIR/api_server_ipv6.pid"
 
-# デフォルトポート
+# dual は IPv4/IPv6 用に API プロセスを1つずつ起動する
+API_HOST="${API_HOST:-dual}"
 API_PORT="${API_PORT:-8000}"
+
+is_running() {
+    local pid_file="$1"
+    [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null
+}
+
+start_api_instance() {
+    local label="$1"
+    local host="$2"
+    local pid_file="$3"
+    local log_file="$4"
+
+    if ! is_running "$pid_file"; then
+        log_info "APIサーバー（$label）を起動中..."
+        nohup python3 api_server.py --host "$host" --port "$API_PORT" > "$log_file" 2>&1 &
+        echo $! > "$pid_file"
+        log_success "APIサーバー（$label）が起動しました (PID: $(cat "$pid_file"))"
+    else
+        log_warning "APIサーバー（$label）は既に起動しています"
+    fi
+}
 
 # サービスの起動
 start_services() {
@@ -179,17 +205,16 @@ start_services() {
     fi
     
     # APIサーバーの起動
-    if [ ! -f "$API_PID_FILE" ] || ! kill -0 $(cat "$API_PID_FILE" 2>/dev/null) 2>/dev/null; then
-        log_info "APIサーバーを起動中..."
-        nohup python3 api_server.py --host 0.0.0.0 --port $API_PORT > logs/api_server.log 2>&1 &
-        #/usr/bin/uvicorn api_server:app --host :: --port $API_PORT > logs/api_server.log 2>&1 &
-        echo $! > "$API_PID_FILE"
-        log_success "APIサーバーが起動しました (PID: $(cat $API_PID_FILE))"
-        log_info "APIサーバー: http://localhost:$API_PORT"
-        log_info "Swagger UI: http://localhost:$API_PORT/docs"
+    if [ "$API_HOST" = "dual" ]; then
+        start_api_instance "IPv4" "0.0.0.0" "$API_IPV4_PID_FILE" "logs/api_server_ipv4.log"
+        start_api_instance "IPv6" "::" "$API_IPV6_PID_FILE" "logs/api_server_ipv6.log"
+        log_info "IPv4 URL: http://127.0.0.1:$API_PORT"
+        log_info "IPv6 URL: http://[::1]:$API_PORT"
     else
-        log_warning "APIサーバーは既に起動しています"
+        start_api_instance "$API_HOST" "$API_HOST" "$API_PID_FILE" "logs/api_server.log"
+        log_info "待受アドレス: $API_HOST:$API_PORT"
     fi
+    log_info "Swagger UI: http://localhost:$API_PORT/docs"
     
     sleep 2
     show_status
@@ -208,10 +233,16 @@ stop_services() {
         log_warning "OCRプロセッサは起動していません"
     fi
     
-    # APIサーバーの停止
-    if [ -f "$API_PID_FILE" ] && kill -0 $(cat "$API_PID_FILE" 2>/dev/null) 2>/dev/null; then
-        kill $(cat "$API_PID_FILE")
-        rm -f "$API_PID_FILE"
+    # APIサーバーの停止（旧形式のPIDファイルも対象にする）
+    local api_stopped=false
+    for pid_file in "$API_PID_FILE" "$API_IPV4_PID_FILE" "$API_IPV6_PID_FILE"; do
+        if is_running "$pid_file"; then
+            kill "$(cat "$pid_file")"
+            api_stopped=true
+        fi
+        rm -f "$pid_file"
+    done
+    if [ "$api_stopped" = true ]; then
         log_success "APIサーバーを停止しました"
     else
         log_warning "APIサーバーは起動していません"
@@ -230,20 +261,31 @@ show_status() {
     fi
     
     # APIサーバーの状態
-    if [ -f "$API_PID_FILE" ] && kill -0 $(cat "$API_PID_FILE" 2>/dev/null) 2>/dev/null; then
-        log_success "APIサーバー: 起動中 (PID: $(cat $API_PID_FILE))"
-        log_info "URL: http://localhost:$API_PORT"
-        
-        # APIサーバーの疎通確認
-        if command -v curl &> /dev/null; then
-            if curl -s http://localhost:$API_PORT/ > /dev/null; then
-                log_success "APIサーバーに正常に接続できます"
-            else
-                log_warning "APIサーバーに接続できません"
-            fi
+    if is_running "$API_IPV4_PID_FILE"; then
+        log_success "APIサーバー（IPv4）: 起動中 (PID: $(cat "$API_IPV4_PID_FILE"))"
+    elif [ "$API_HOST" = "dual" ]; then
+        log_warning "APIサーバー（IPv4）: 停止中"
+    fi
+    if is_running "$API_IPV6_PID_FILE"; then
+        log_success "APIサーバー（IPv6）: 起動中 (PID: $(cat "$API_IPV6_PID_FILE"))"
+    elif [ "$API_HOST" = "dual" ]; then
+        log_warning "APIサーバー（IPv6）: 停止中"
+    fi
+    if is_running "$API_PID_FILE"; then
+        log_success "APIサーバー: 起動中 (PID: $(cat "$API_PID_FILE"))"
+    fi
+
+    if command -v curl &> /dev/null; then
+        if curl --noproxy "*" -4 -s "http://127.0.0.1:$API_PORT/" > /dev/null; then
+            log_success "APIサーバーにIPv4で接続できます"
+        else
+            log_warning "APIサーバーにIPv4で接続できません"
         fi
-    else
-        log_warning "APIサーバー: 停止中"
+        if curl --noproxy "*" -6 -g -s "http://[::1]:$API_PORT/" > /dev/null; then
+            log_success "APIサーバーにIPv6で接続できます"
+        else
+            log_warning "APIサーバーにIPv6で接続できません"
+        fi
     fi
 }
 
