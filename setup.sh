@@ -44,6 +44,7 @@ show_help() {
     echo "  ./setup.sh [command] [options]"
     echo "  API_PORT=3000 ./setup.sh start    # ポート指定"
     echo "  API_HOST=127.0.0.1 ./setup.sh start  # 待受アドレス指定"
+    echo "  OCR_GPU=false ./setup.sh start    # OCRプロセッサをCPUのみで起動"
     echo ""
     echo "コマンド:"
     echo "  install     - 依存関係をインストール"
@@ -62,6 +63,7 @@ show_help() {
     echo "  ./setup.sh start              # サービス起動（ポート8000）"
     echo "  API_PORT=8001 ./setup.sh start  # ポート8001で起動"
     echo "  API_HOST=dual ./setup.sh start  # IPv4/IPv6で待受（デフォルト）"
+    echo "  OCR_GPU=false ./setup.sh start  # OCRをCPUのみで実行"
     echo "  ./setup.sh test               # テスト実行"
 }
 
@@ -163,6 +165,7 @@ API_IPV6_PID_FILE="$PID_DIR/api_server_ipv6.pid"
 # dual は IPv4/IPv6 用に API プロセスを1つずつ起動する
 API_HOST="${API_HOST:-dual}"
 API_PORT="${API_PORT:-8000}"
+OCR_GPU="${OCR_GPU:-true}"
 
 is_running() {
     local pid_file="$1"
@@ -196,8 +199,8 @@ start_services() {
     
     # OCRプロセッサの起動
     if [ ! -f "$OCR_PID_FILE" ] || ! kill -0 $(cat "$OCR_PID_FILE" 2>/dev/null) 2>/dev/null; then
-        log_info "OCRプロセッサを起動中..."
-        nohup python3 ocr_processor.py > logs/ocr_processor.log 2>&1 &
+        log_info "OCRプロセッサを起動中... (GPU使用: $OCR_GPU)"
+        OCR_GPU="$OCR_GPU" nohup python3 ocr_processor.py > logs/ocr_processor.log 2>&1 &
         echo $! > "$OCR_PID_FILE"
         log_success "OCRプロセッサが起動しました (PID: $(cat $OCR_PID_FILE))"
     else

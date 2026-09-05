@@ -14,8 +14,8 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
 class OCRProcessor:
-    def __init__(self):
-        self.reader = easyocr.Reader(['ja', 'en'], gpu=False)
+    def __init__(self, gpu=True):
+        self.reader = easyocr.Reader(['ja', 'en'], gpu=gpu)
         self.images_dir = Path('images')
         self.process_dir = Path('process')
         self.result_dir = Path('result')
@@ -239,7 +239,21 @@ class OCRProcessor:
             print("\nOCR処理を終了します。")
 
 def main():
-    processor = OCRProcessor()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="EasyOCR Processor")
+    gpu_group = parser.add_mutually_exclusive_group()
+    gpu_group.add_argument("--gpu", dest="gpu", action="store_true", default=None, help="GPUを使用する")
+    gpu_group.add_argument("--no-gpu", dest="gpu", action="store_false", help="GPUを使用しない（CPUのみ）")
+    args = parser.parse_args()
+
+    if args.gpu is None:
+        gpu = os.environ.get("OCR_GPU", "true").strip().lower() not in ("0", "false", "no")
+    else:
+        gpu = args.gpu
+
+    print(f"GPU使用: {gpu}")
+    processor = OCRProcessor(gpu=gpu)
     processor.run_continuous()
 
 if __name__ == "__main__":
