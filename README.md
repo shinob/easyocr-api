@@ -140,7 +140,20 @@ GET /download/csv/{csv_filename}      # 結果CSV
 | `./setup.sh status` | サービス状態確認 |
 | `./setup.sh test` | テスト画像でOCR実行 |
 | `./setup.sh clean` | 一時ファイル削除 |
+| `./setup.sh autostart-enable` | OS起動時の自動起動を有効化（systemd ユーザーサービス + linger） |
+| `./setup.sh autostart-disable` | 自動起動を無効化してサービス停止 |
 | `./setup.sh help` | ヘルプ表示 |
+
+### 自動起動（systemd）
+
+```bash
+API_PORT=3000 ./setup.sh autostart-enable    # ポート・待受（API_HOST）・OCR_GPU は有効化時の値でユニットに固定される
+systemctl --user status 'easyocr-api*'       # 状態確認
+systemctl --user restart easyocr-api.target  # 再起動（自動起動中は ./setup.sh start/stop/restart は使用不可）
+```
+
+ユニットは `~/.config/systemd/user/easyocr-api*.{service,target}` に生成され、異常終了時は5秒後に自動再起動されます。
+ログは従来どおり `logs/*.log` に追記されます。設定を変える場合は新しい環境変数で `autostart-enable` を再実行してください。
 
 ## 個別起動方法
 
